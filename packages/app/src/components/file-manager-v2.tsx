@@ -1,6 +1,7 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { DividerV2 } from "@opencode-ai/ui/v2/divider-v2"
+import { Field } from "@opencode-ai/ui/v2/field-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -78,22 +79,24 @@ export function FileManagerPromptV2(props: {
         <DialogTitle>{props.title}</DialogTitle>
       </DialogHeader>
       <DividerV2 />
-      <DialogBody class="pt-4!">
-        <TextInputV2
-          autofocus
-          autocomplete="off"
-          spellcheck={false}
-          class="!w-full"
-          value={value()}
-          aria-label={language.t("file.manager.name")}
-          placeholder={language.t("file.manager.name")}
-          onInput={(event) => setValue(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return
-            event.preventDefault()
-            confirm()
-          }}
-        />
+      <DialogBody class="flex w-full flex-col gap-6 px-4 pt-4 pb-1">
+        <Field>
+          <Field.Label>{language.t("file.manager.name")}</Field.Label>
+          <TextInputV2
+            autofocus
+            appearance="large"
+            class="!w-full"
+            autocomplete="off"
+            spellcheck={false}
+            value={value()}
+            onInput={(event) => setValue(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return
+              event.preventDefault()
+              confirm()
+            }}
+          />
+        </Field>
       </DialogBody>
       <DialogFooter>
         <ButtonV2 variant="neutral" onClick={() => dialog.close()}>

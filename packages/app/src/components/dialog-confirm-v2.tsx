@@ -1,6 +1,7 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { DividerV2 } from "@opencode-ai/ui/v2/divider-v2"
+import { Field } from "@opencode-ai/ui/v2/field-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createSignal, Show } from "solid-js"
@@ -43,21 +44,24 @@ export function ConfirmDialogV2(props: {
         <DialogTitle>{props.title}</DialogTitle>
       </DialogHeader>
       <DividerV2 />
-      <DialogBody class="flex flex-col gap-3 pt-4!">
+      <DialogBody class="flex w-full flex-col gap-4 px-4 pt-4 pb-1">
         <div class="text-13-regular text-v2-text-text-weak">{props.description}</div>
         <Show when={props.requireTypedName}>
           {(name) => (
-            <TextInputV2
-              autofocus
-              autocomplete="off"
-              spellcheck={false}
-              class="!w-full"
-              value={typed()}
-              aria-label={language.t("file.confirm.typeName", { name: name() })}
-              placeholder={name()}
-              onInput={(event) => setTyped(event.currentTarget.value)}
-              onKeyDown={onKeyDown}
-            />
+            <Field>
+              <Field.Label>{language.t("file.confirm.typeName", { name: name() })}</Field.Label>
+              <TextInputV2
+                autofocus
+                appearance="large"
+                class="!w-full"
+                autocomplete="off"
+                spellcheck={false}
+                value={typed()}
+                placeholder={name()}
+                onInput={(event) => setTyped(event.currentTarget.value)}
+                onKeyDown={onKeyDown}
+              />
+            </Field>
           )}
         </Show>
       </DialogBody>
