@@ -26,3 +26,33 @@ jobs:
           name: opencode-linux-x64
           path: packages/opencode/dist/opencode-linux-x64/bin/opencode
           if-no-files-found: error
+
+  deploy:
+    needs: build-linux
+    if: github.ref == 'refs/heads/custom-fs'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install deploy key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 25901 -H 160.187.240.56 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: opencode-linux-x64
+
+      - name: Deploy to VPS
+        run: |
+          scp -P 25901 -o BatchMode=yes opencode root@160.187.240.56:/tmp/opencode-custom-bin
+          ssh -p 25901 -o BatchMode=yes root@160.187.240.56 '
+            set -e
+            cp /usr/bin/opencode /usr/bin/opencode.bak
+            install -m 755 /tmp/opencode-custom-bin /usr/bin/opencode
+            systemctl restart opencode-web
+            sleep 5
+            systemctl is-active opencode-web
+            /usr/bin/opencode --version
+          '
+
