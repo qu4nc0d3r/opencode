@@ -60,8 +60,14 @@ import type {
   ExperimentalWorkspaceSyncListResponses,
   ExperimentalWorkspaceWarpErrors,
   ExperimentalWorkspaceWarpResponses,
+  FileArchiveErrors,
+  FileArchiveResponses,
+  FileCopyErrors,
+  FileCopyResponses,
   FileDownloadErrors,
   FileDownloadResponses,
+  FileExtractErrors,
+  FileExtractResponses,
   FileListErrors,
   FileListResponses,
   FileMkdirErrors,
@@ -2081,6 +2087,125 @@ export class File extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<FileRemoveResponses, FileRemoveErrors, ThrowOnError>({
       url: "/file/remove",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Copy file
+   *
+   * Copy a file or directory, refusing to overwrite the destination unless requested.
+   */
+  public copy<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      from?: string
+      to?: string
+      overwrite?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "from" },
+            { in: "body", key: "to" },
+            { in: "body", key: "overwrite" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<FileCopyResponses, FileCopyErrors, ThrowOnError>({
+      url: "/file/copy",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Archive files
+   *
+   * Compress one or more files or directories into a zip archive.
+   */
+  public archive<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      paths?: Array<string>
+      dest?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "paths" },
+            { in: "body", key: "dest" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<FileArchiveResponses, FileArchiveErrors, ThrowOnError>({
+      url: "/file/archive",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Extract archive
+   *
+   * Extract a zip archive, rejecting entries that escape the destination.
+   */
+  public extract<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      path?: string
+      dest?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "path" },
+            { in: "body", key: "dest" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<FileExtractResponses, FileExtractErrors, ThrowOnError>({
+      url: "/file/extract",
       ...options,
       ...params,
       headers: {

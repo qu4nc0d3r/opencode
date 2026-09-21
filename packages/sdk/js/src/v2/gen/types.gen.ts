@@ -2314,6 +2314,11 @@ export type FileOperationError = {
   path?: string
 }
 
+export type FileArchiveResult = {
+  path: string
+  bytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
 export type FileUploadResult = {
   path: string
   bytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
@@ -8224,6 +8229,100 @@ export type FileRemoveResponses = {
 }
 
 export type FileRemoveResponse = FileRemoveResponses[keyof FileRemoveResponses]
+
+export type FileCopyData = {
+  body?: {
+    from: string
+    to: string
+    overwrite?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/copy"
+}
+
+export type FileCopyErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileCopyError = FileCopyErrors[keyof FileCopyErrors]
+
+export type FileCopyResponses = {
+  /**
+   * Copied path
+   */
+  200: FileMutationResult
+}
+
+export type FileCopyResponse = FileCopyResponses[keyof FileCopyResponses]
+
+export type FileArchiveData = {
+  body?: {
+    paths: Array<string>
+    dest: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/archive"
+}
+
+export type FileArchiveErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileArchiveError = FileArchiveErrors[keyof FileArchiveErrors]
+
+export type FileArchiveResponses = {
+  /**
+   * Created archive
+   */
+  200: FileArchiveResult
+}
+
+export type FileArchiveResponse = FileArchiveResponses[keyof FileArchiveResponses]
+
+export type FileExtractData = {
+  body?: {
+    path: string
+    dest?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/extract"
+}
+
+export type FileExtractErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileExtractError = FileExtractErrors[keyof FileExtractErrors]
+
+export type FileExtractResponses = {
+  /**
+   * Extracted archive
+   */
+  200: FileMutationResult
+}
+
+export type FileExtractResponse = FileExtractResponses[keyof FileExtractResponses]
 
 export type FileUploadData = {
   body?: never
