@@ -73,7 +73,7 @@ export function FileManagerPromptV2(props: {
   }
 
   return (
-    <Dialog size="normal">
+    <Dialog fit>
       <DialogHeader>
         <DialogTitle>{props.title}</DialogTitle>
       </DialogHeader>
@@ -83,6 +83,7 @@ export function FileManagerPromptV2(props: {
           autofocus
           autocomplete="off"
           spellcheck={false}
+          class="!w-full"
           value={value()}
           aria-label={language.t("file.manager.name")}
           placeholder={language.t("file.manager.name")}

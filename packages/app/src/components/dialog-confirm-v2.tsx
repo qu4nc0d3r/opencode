@@ -38,7 +38,7 @@ export function ConfirmDialogV2(props: {
   }
 
   return (
-    <Dialog size="normal">
+    <Dialog fit>
       <DialogHeader>
         <DialogTitle>{props.title}</DialogTitle>
       </DialogHeader>
@@ -51,6 +51,7 @@ export function ConfirmDialogV2(props: {
               autofocus
               autocomplete="off"
               spellcheck={false}
+              class="!w-full"
               value={typed()}
               aria-label={language.t("file.confirm.typeName", { name: name() })}
               placeholder={name()}
