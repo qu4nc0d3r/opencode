@@ -20,6 +20,18 @@ function deps() {
       calls.push(`remove:${JSON.stringify(input)}`)
       return { data: { path: "/x" } }
     },
+    copy: async (input: unknown) => {
+      calls.push(`copy:${JSON.stringify(input)}`)
+      return { data: { path: "/x" } }
+    },
+    archive: async (input: unknown) => {
+      calls.push(`archive:${JSON.stringify(input)}`)
+      return { data: { path: "/x", bytes: 1 } }
+    },
+    extract: async (input: unknown) => {
+      calls.push(`extract:${JSON.stringify(input)}`)
+      return { data: { path: "/x" } }
+    },
   }
   const refreshed: string[] = []
   const errors: string[] = []
@@ -44,9 +56,7 @@ describe("createFileOps", () => {
   test("write passes directory and payload then refreshes the parent", async () => {
     const { ops, calls, refreshed } = deps()
     await ops.write("/root/project/a/b.txt", "hi")
-    expect(calls[0]).toBe(
-      'write:{"directory":"/root/project","path":"/root/project/a/b.txt","content":"hi"}',
-    )
+    expect(calls[0]).toBe('write:{"directory":"/root/project","path":"/root/project/a/b.txt","content":"hi"}')
     expect(refreshed).toEqual(["/root/project/a"])
   })
 
@@ -65,6 +75,38 @@ describe("createFileOps", () => {
     await ops.remove("/root/project/a.txt")
     await failing.remove("/root/project/a.txt")
     expect(errors).toEqual(["denied"])
+  })
+
+  test("copy calls the api and refreshes destination parent", async () => {
+    const { ops, calls, refreshed } = deps()
+    await ops.copy("/root/a.txt", "/root/b/c.txt")
+    expect(calls[0]).toContain("copy:")
+    expect(calls[0]).toContain('"from":"/root/a.txt"')
+    expect(calls[0]).toContain('"to":"/root/b/c.txt"')
+    expect(refreshed).toContain("/root/b")
+  })
+
+  test("archive calls the api and refreshes the parent of the destination", async () => {
+    const { ops, calls, refreshed } = deps()
+    await ops.archive(["/root/a", "/root/b"], "/root/out.zip")
+    expect(calls[0]).toContain("archive:")
+    expect(calls[0]).toContain('"paths":["/root/a","/root/b"]')
+    expect(calls[0]).toContain('"dest":"/root/out.zip"')
+    expect(refreshed).toContain("/root")
+  })
+
+  test("extract refreshes the parent of the destination", async () => {
+    const { ops, calls, refreshed } = deps()
+    await ops.extract("/root/pack.zip")
+    expect(calls[0]).toContain("extract:")
+    expect(refreshed).toContain("/root")
+  })
+
+  test("extract with a destination refreshes that destination's parent", async () => {
+    const { ops, calls, refreshed } = deps()
+    await ops.extract("/root/pack.zip", "/root/out/nested")
+    expect(calls[0]).toContain('"dest":"/root/out/nested"')
+    expect(refreshed).toContain("/root/out")
   })
 
   test("downloadUrl builds an absolute download link", () => {

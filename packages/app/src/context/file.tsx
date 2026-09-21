@@ -100,12 +100,14 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         mkdir: (input) => serverSDK().client.file.mkdir(input),
         rename: (input) => serverSDK().client.file.rename(input),
         remove: (input) => serverSDK().client.file.remove(input),
+        copy: (input) => serverSDK().client.file.copy(input),
+        archive: (input) => serverSDK().client.file.archive(input),
+        extract: (input) => serverSDK().client.file.extract(input),
       },
       refresh: (dir) => {
         void tree.listDir(dir, { force: true })
       },
-      onError: (message) =>
-        showToast({ variant: "error", title: language.t("file.ops.failed"), description: message }),
+      onError: (message) => showToast({ variant: "error", title: language.t("file.ops.failed"), description: message }),
     })
 
     const evictContent = (keep?: Set<string>) => {

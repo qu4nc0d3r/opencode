@@ -10,6 +10,9 @@ export type FileOpsDeps = {
     mkdir: (input: { directory: string; path: string; recursive?: boolean }) => Promise<unknown>
     rename: (input: { directory: string; from: string; to: string }) => Promise<unknown>
     remove: (input: { directory: string; path: string; recursive?: boolean }) => Promise<unknown>
+    copy: (input: { directory: string; from: string; to: string; overwrite?: boolean }) => Promise<unknown>
+    archive: (input: { directory: string; paths: string[]; dest: string }) => Promise<unknown>
+    extract: (input: { directory: string; path: string; dest?: string }) => Promise<unknown>
   }
   refresh: (directory: string) => void
   onError: (message: string) => void
@@ -35,8 +38,7 @@ export function createFileOps(deps: FileOpsDeps) {
   return {
     write: (target: string, content: string, encoding?: "utf8" | "base64") =>
       run(() => deps.api.write({ directory: deps.directory(), path: target, content, encoding }), target),
-    mkdir: (target: string) =>
-      run(() => deps.api.mkdir({ directory: deps.directory(), path: target }), target),
+    mkdir: (target: string) => run(() => deps.api.mkdir({ directory: deps.directory(), path: target }), target),
     rename: (from: string, to: string) =>
       run(() => deps.api.rename({ directory: deps.directory(), from, to }), to).then((ok) => {
         if (ok) deps.refresh(parentOf(from))
@@ -44,6 +46,12 @@ export function createFileOps(deps: FileOpsDeps) {
       }),
     remove: (target: string, recursive?: boolean) =>
       run(() => deps.api.remove({ directory: deps.directory(), path: target, recursive }), target),
+    copy: (from: string, to: string, overwrite?: boolean) =>
+      run(() => deps.api.copy({ directory: deps.directory(), from, to, overwrite }), to),
+    archive: (paths: string[], dest: string) =>
+      run(() => deps.api.archive({ directory: deps.directory(), paths, dest }), dest),
+    extract: (target: string, dest?: string) =>
+      run(() => deps.api.extract({ directory: deps.directory(), path: target, dest }), dest ?? target),
     async upload(target: string, data: Uint8Array) {
       try {
         const response = await fetch(

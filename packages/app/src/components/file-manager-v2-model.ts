@@ -1,5 +1,6 @@
 export type FileManagerAction =
   | "open"
+  | "select"
   | "newFile"
   | "newFolder"
   | "rename"

@@ -15,6 +15,7 @@ import {
 
 const actionKeys = {
   open: "common.open",
+  select: "file.selection.select",
   newFile: "file.manager.newFile",
   newFolder: "file.manager.newFolder",
   rename: "file.manager.rename",
@@ -47,6 +48,7 @@ export function FileManagerContextMenu(
               <MenuV2.Item onSelect={() => props.onAction(action)}>{language.t(actionKeys[action])}</MenuV2.Item>
             )}
           </For>
+          <MenuV2.Item onSelect={() => props.onAction("select")}>{language.t(actionKeys.select)}</MenuV2.Item>
         </MenuV2.Context.Content>
       </MenuV2.Context.Portal>
     </MenuV2.Context>

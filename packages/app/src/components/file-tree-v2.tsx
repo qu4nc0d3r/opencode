@@ -57,7 +57,7 @@ export const kindChange = (kind: Kind) => {
 
 const LONG_PRESS_DELAY = 520
 
-function startLongPress(event: PointerEvent, element: HTMLElement, onOpen: () => void) {
+function startLongPress(event: PointerEvent, element: HTMLElement, onOpen: () => "menu" | "consume") {
   const startX = event.clientX
   const startY = event.clientY
   const startedAt = Date.now()
@@ -74,7 +74,7 @@ function startLongPress(event: PointerEvent, element: HTMLElement, onOpen: () =>
   const timer = setTimeout(() => {
     finish()
     if (longPressDecision({ moved, durationMs: Date.now() - startedAt }) !== "open") return
-    onOpen()
+    if (onOpen() === "consume") return
     element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: startX, clientY: startY }))
   }, LONG_PRESS_DELAY)
   element.addEventListener("pointermove", move, { passive: true })
@@ -92,6 +92,8 @@ const FileTreeNodeV2 = (
       draggable: boolean
       kinds?: ReadonlyMap<string, Kind>
       as?: "div" | "button"
+      selectionMode?: boolean
+      selected?: boolean
     },
 ) => {
   const [local, rest] = splitProps(p, [
@@ -101,6 +103,8 @@ const FileTreeNodeV2 = (
     "draggable",
     "kinds",
     "as",
+    "selectionMode",
+    "selected",
     "children",
     "class",
     "classList",
@@ -129,6 +133,21 @@ const FileTreeNodeV2 = (
       }}
       {...rest}
     >
+      <Show when={local.selectionMode}>
+        <span
+          data-slot="file-tree-v2-checkbox"
+          data-checked={local.selected ? "" : undefined}
+          aria-hidden="true"
+          class="mr-1 flex size-5 shrink-0 items-center justify-center rounded-sm border border-v2-border-border-base"
+          classList={{
+            "border-v2-background-bg-accent bg-v2-background-bg-accent text-v2-text-text-inverse": !!local.selected,
+          }}
+        >
+          <Show when={local.selected}>
+            <Icon name="check" size="small" />
+          </Show>
+        </span>
+      </Show>
       {local.children}
       <span class="flex-1 min-w-0 text-start text-12-medium whitespace-nowrap truncate">
         <bdi dir="auto">{local.node.name}</bdi>
@@ -165,6 +184,12 @@ export default function FileTreeV2(props: {
   onActiveChange?: (node: FileTreeV2Node | undefined) => void
   hidden?: (node: FileTreeV2Node) => boolean
   contextMenu?: (node: FileTreeV2Node, content: JSX.Element) => JSX.Element
+  selectionMode?: boolean
+  selected?: (node: FileTreeV2Node) => boolean
+  selectionAnchor?: string
+  onSelectToggle?: (node: FileTreeV2Node) => void
+  onSelectRange?: (input: { order: string[]; anchor: string; to: string }) => void
+  onExitSelection?: () => void
 }) {
   const file = useFile()
   const language = useLanguage()
@@ -175,6 +200,11 @@ export default function FileTreeV2(props: {
     const element = event.currentTarget
     startLongPress(event, element, () => {
       longPressedAt = Date.now()
+      if (props.selectionMode) {
+        props.onExitSelection?.()
+        return "consume"
+      }
+      return "menu"
     })
   }
   const dispatchRowMenu = (element: HTMLElement, x: number, y: number) => {
@@ -283,6 +313,21 @@ export default function FileTreeV2(props: {
     props.onContextMenu(node, event)
   }
 
+  const selectRow = (node: FileTreeV2Node, event: MouseEvent) => {
+    const modifier = event.ctrlKey || event.metaKey || event.shiftKey
+    if (!props.selectionMode && !modifier) return false
+    if (event.shiftKey && props.selectionAnchor && props.onSelectRange) {
+      props.onSelectRange({
+        order: visibleRows().map((row) => row.node.path),
+        anchor: props.selectionAnchor,
+        to: node.path,
+      })
+      return true
+    }
+    props.onSelectToggle?.(node)
+    return true
+  }
+
   const rowByKey = createMemo(() => new Map(visibleRows().map((row) => [row.node.path, row] as const)))
   const virtualItemByKey = createMemo(
     () => new Map(virtualizer.getVirtualItems().map((item) => [item.key, item] as const)),
@@ -328,14 +373,20 @@ export default function FileTreeV2(props: {
                               as="button"
                               type="button"
                               class="relative"
+                              selectionMode={props.selectionMode}
+                              selected={props.selected?.(row().node)}
                               onFocus={() => setFocused(row().node.path)}
                               onBlur={() => setFocused(undefined)}
-                              onClick={() => {
+                              onClick={(event) => {
                                 if (suppressClick()) return
+                                if (selectRow(row(), event)) return
                                 activateRow(row())
                                 selectFile(row().node, props.onFileClick)
                               }}
-                              onDblClick={() => selectFile(row().node, props.onFileDoubleClick)}
+                              onDblClick={() => {
+                                if (props.selectionMode) return
+                                selectFile(row().node, props.onFileDoubleClick)
+                              }}
                               onContextMenu={(event) => openRowMenu(row(), event)}
                               onPointerDown={longPress}
                             >
@@ -359,11 +410,14 @@ export default function FileTreeV2(props: {
                             as="button"
                             type="button"
                             class="relative"
+                            selectionMode={props.selectionMode}
+                            selected={props.selected?.(row().node)}
                             onFocus={() => setFocused(row().node.path)}
                             onBlur={() => setFocused(undefined)}
                             aria-expanded={expanded(row().node.path)}
-                            onClick={() => {
+                            onClick={(event) => {
                               if (suppressClick()) return
+                              if (selectRow(row(), event)) return
                               activateRow(row())
                               toggleDirectory(row().node.path, row().node.originalPath)
                             }}
