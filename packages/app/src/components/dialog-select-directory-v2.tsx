@@ -1,5 +1,5 @@
 import "@pierre/trees/web-components"
-import { FileTree } from "@pierre/trees"
+import { FileTree, type ContextMenuItem as FileTreeContextMenuItem } from "@pierre/trees"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
@@ -30,6 +30,10 @@ import {
 import "./dialog-select-directory-v2.css"
 import { DividerV2 } from "@opencode-ai/ui/v2/divider-v2"
 import { getFilename } from "@opencode-ai/core/util/path"
+import { ConfirmDialogV2 } from "./dialog-confirm-v2"
+import { FileManagerPromptV2 } from "./file-manager-v2"
+import { joinChildPath, pickerMenuItems, type PickerMenuAction } from "./directory-picker-menu-model"
+import { showToast } from "@/utils/toast"
 
 interface DialogSelectDirectoryV2Props {
   title?: string
@@ -39,6 +43,15 @@ interface DialogSelectDirectoryV2Props {
   mode?: "directory" | "file"
   start?: string
 }
+
+const pickerActionLabels = {
+  open: "file.picker.open",
+  select: "file.picker.selectThisFolder",
+  newFolder: "file.manager.newFolder",
+  rename: "file.manager.rename",
+  delete: "file.manager.delete",
+  refresh: "file.manager.refresh",
+} as const satisfies Record<PickerMenuAction, string>
 
 export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   const global = useGlobal()
@@ -58,11 +71,15 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal(false)
   const [rootValid, setRootValid] = createSignal(false)
+  const [pickerMenu, setPickerMenu] = createSignal<
+    { item: FileTreeContextMenuItem; x: number; y: number; close: () => void } | undefined
+  >()
   const listings = new Map<string, Promise<Array<{ name: string; type: "file" | "directory" }> | undefined>>()
   const loads = createPriorityTaskQueue<Array<{ name: string; type: "file" | "directory" }> | undefined>(3)
   const advanced = new Set<string>()
   let tree: FileTree | undefined
   let container: HTMLDivElement | undefined
+  let menuPanel: HTMLDivElement | undefined
   let pathArea: HTMLDivElement | undefined
   let navigation = 0
 
@@ -232,6 +249,100 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     dialog.close()
   }
 
+  function parentOf(path: string) {
+    const trimmed = path.replace(/\/+$/, "")
+    const index = trimmed.lastIndexOf("/")
+    return index <= 0 ? "" : trimmed.slice(0, index)
+  }
+
+  function dismissPickerMenu() {
+    const menu = pickerMenu()
+    if (!menu) return
+    menu.close()
+    setPickerMenu(undefined)
+  }
+
+  function reportPickerError(error: unknown) {
+    showToast({
+      variant: "error",
+      title: language.t("file.ops.failed"),
+      description: error instanceof Error && error.message ? error.message : String(error),
+    })
+  }
+
+  function runPickerAction(action: PickerMenuAction) {
+    const menu = pickerMenu()
+    if (!menu) return
+    const item = menu.item
+    const directory = root()
+    dismissPickerMenu()
+
+    if (action === "open") {
+      void navigate(item.path)
+      return
+    }
+
+    if (action === "select") {
+      setSelected(policy.selection(root(), item.path) ?? "")
+      resolve()
+      return
+    }
+
+    if (action === "newFolder") {
+      dialog.push(() => (
+        <FileManagerPromptV2
+          title={language.t("file.manager.newFolder")}
+          confirmLabel={language.t("file.manager.create")}
+          onConfirm={(name) => {
+            void sdk.client.file
+              .mkdir({ directory, path: joinChildPath(item.path, name) })
+              .then(() => navigate(root()))
+              .catch(reportPickerError)
+          }}
+        />
+      ))
+      return
+    }
+
+    if (action === "rename") {
+      dialog.push(() => (
+        <FileManagerPromptV2
+          title={language.t("file.manager.rename")}
+          confirmLabel={language.t("file.manager.rename")}
+          initialValue={item.name}
+          onConfirm={(name) => {
+            void sdk.client.file
+              .rename({ directory, from: item.path, to: joinChildPath(parentOf(item.path), name) })
+              .then(() => navigate(root()))
+              .catch(reportPickerError)
+          }}
+        />
+      ))
+      return
+    }
+
+    if (action === "delete") {
+      dialog.push(() => (
+        <ConfirmDialogV2
+          title={language.t("file.confirm.delete.title", { name: item.name })}
+          description={language.t("file.confirm.delete.description")}
+          confirmLabel={language.t("file.manager.delete")}
+          destructive
+          requireTypedName={item.name}
+          onConfirm={() => {
+            void sdk.client.file
+              .remove({ directory, path: item.path, recursive: true })
+              .then(() => navigate(root()))
+              .catch(reportPickerError)
+          }}
+        />
+      ))
+      return
+    }
+
+    void navigate(root())
+  }
+
   onMount(() => {
     const closeSuggestions = (event: PointerEvent) => {
       if (pathArea?.contains(event.target as Node)) return
@@ -245,6 +356,19 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
       flattenEmptyDirectories: false,
       initialExpansion: "closed",
       stickyFolders: true,
+      composition: {
+        contextMenu: {
+          enabled: true,
+          triggerMode: "both",
+          buttonVisibility: "when-needed",
+          onOpen(item, ctx) {
+            setPickerMenu({ item, x: ctx.anchorRect.x, y: ctx.anchorRect.y, close: () => ctx.close() })
+          },
+          onClose() {
+            setPickerMenu(undefined)
+          },
+        },
+      },
       unsafeCSS: `
         button[data-type="item"] {
           background: transparent !important;
@@ -279,6 +403,25 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     const path = start()
     if (!path || root()) return
     void navigate(path)
+  })
+
+  createEffect(() => {
+    if (!pickerMenu()) return
+    const onPointerDown = (event: PointerEvent) => {
+      const path = event.composedPath()
+      if (path.some((node) => node === menuPanel || node === container)) return
+      dismissPickerMenu()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      dismissPickerMenu()
+    }
+    document.addEventListener("pointerdown", onPointerDown, true)
+    document.addEventListener("keydown", onKeyDown, true)
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", onPointerDown, true)
+      document.removeEventListener("keydown", onKeyDown, true)
+    })
   })
 
   onCleanup(() => tree?.cleanUp())
@@ -381,6 +524,36 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
           {action[policy.action]}
         </ButtonV2>
       </DialogFooter>
+      <Show when={pickerMenu()}>
+        {(menu) => (
+          <Show when={pickerMenuItems(menu().item).length > 0}>
+            <div
+              ref={menuPanel}
+              data-component="menu-v2-content"
+              data-file-tree-context-menu-root="true"
+              style={{
+                position: "fixed",
+                left: `${Math.min(menu().x, window.innerWidth - 200)}px`,
+                top: `${Math.min(menu().y, window.innerHeight - 260)}px`,
+              }}
+            >
+              <For each={pickerMenuItems(menu().item)}>
+                {(item) => (
+                  <button
+                    type="button"
+                    data-component="menu-v2-item"
+                    onPointerEnter={(event) => event.currentTarget.setAttribute("data-highlighted", "")}
+                    onPointerLeave={(event) => event.currentTarget.removeAttribute("data-highlighted")}
+                    onClick={() => runPickerAction(item)}
+                  >
+                    <span data-slot="menu-v2-item-content">{language.t(pickerActionLabels[item])}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+        )}
+      </Show>
     </Dialog>
   )
 }

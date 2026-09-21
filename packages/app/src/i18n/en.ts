@@ -592,6 +592,8 @@ export const dict = {
   "file.selection.select": "Select",
   "file.selection.count": "{{count}} selected",
   "file.selection.clear": "Clear selection",
+  "file.picker.open": "Open",
+  "file.picker.selectThisFolder": "Select this folder",
   "file.bulk.download": "Download",
   "file.bulk.compress": "Compress",
   "file.bulk.copy": "Copy",

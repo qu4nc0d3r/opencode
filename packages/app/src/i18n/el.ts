@@ -1209,4 +1209,6 @@ export const dict = {
   "file.bulk.copy": "Copy",
   "file.bulk.move": "Move",
   "file.bulk.delete": "Delete",
+  "file.picker.open": "Open",
+  "file.picker.selectThisFolder": "Select this folder",
 }
