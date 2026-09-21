@@ -10,6 +10,7 @@ import {
   Show,
   splitProps,
   type ComponentProps,
+  type JSX,
   type ParentProps,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
@@ -17,12 +18,14 @@ import type { FileNode } from "@opencode-ai/sdk/v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { pathToFileUrl, withFileDragImage, type Kind } from "@/components/file-tree"
 import { createVirtualizer, defaultRangeExtractor } from "@tanstack/solid-virtual"
+import { longPressDecision } from "@/components/file-manager-v2-model"
 import {
   buildFileTreeV2Model,
   flattenFileTreeV2,
   flattenLiveFileTreeV2,
   normalizeFileTreeV2Path,
   type FileTreeV2Node,
+  type FileTreeV2Row,
 } from "@/components/file-tree-v2-model"
 import { virtualScrollElement } from "@/components/virtual-scroll-element"
 
@@ -50,6 +53,33 @@ export const kindChange = (kind: Kind) => {
   if (kind === "add") return "added"
   if (kind === "del") return "deleted"
   return "modified"
+}
+
+const LONG_PRESS_DELAY = 520
+
+function startLongPress(event: PointerEvent, element: HTMLElement, onOpen: () => void) {
+  const startX = event.clientX
+  const startY = event.clientY
+  const startedAt = Date.now()
+  let moved = 0
+  const move = (next: PointerEvent) => {
+    moved = Math.max(moved, Math.hypot(next.clientX - startX, next.clientY - startY))
+  }
+  const finish = () => {
+    clearTimeout(timer)
+    element.removeEventListener("pointermove", move)
+    element.removeEventListener("pointerup", finish)
+    element.removeEventListener("pointercancel", finish)
+  }
+  const timer = setTimeout(() => {
+    finish()
+    if (longPressDecision({ moved, durationMs: Date.now() - startedAt }) !== "open") return
+    onOpen()
+    element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: startX, clientY: startY }))
+  }, LONG_PRESS_DELAY)
+  element.addEventListener("pointermove", move, { passive: true })
+  element.addEventListener("pointerup", finish)
+  element.addEventListener("pointercancel", finish)
 }
 
 const FileTreeNodeV2 = (
@@ -133,10 +163,23 @@ export default function FileTreeV2(props: {
   onFileDoubleClick?: (file: FileNode) => void
   onContextMenu?: (node: FileTreeV2Node, event: MouseEvent) => void
   onActiveChange?: (node: FileTreeV2Node | undefined) => void
+  hidden?: (node: FileTreeV2Node) => boolean
+  contextMenu?: (node: FileTreeV2Node, content: JSX.Element) => JSX.Element
 }) {
   const file = useFile()
   const language = useLanguage()
   const [menuActive, setMenuActive] = createSignal<string>()
+  let longPressedAt = 0
+  const suppressClick = () => Date.now() - longPressedAt < 700
+  const longPress = (event: PointerEvent & { currentTarget: HTMLElement }) => {
+    const element = event.currentTarget
+    startLongPress(event, element, () => {
+      longPressedAt = Date.now()
+    })
+  }
+  const dispatchRowMenu = (element: HTMLElement, x: number, y: number) => {
+    element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: x, clientY: y }))
+  }
   const live = () => props.allowed === undefined
   const draggable = () => props.draggable ?? true
   const active = () => normalizeFileTreeV2Path(props.active ?? "")
@@ -146,11 +189,27 @@ export default function FileTreeV2(props: {
     if (live()) return flattenLiveFileTreeV2((path) => file.tree.children(path), expanded)
     return flattenFileTreeV2(model()!, expanded)
   })
+  const visibleRows = createMemo(() => {
+    const hidden = props.hidden
+    if (!hidden) return rows()
+    const visible: FileTreeV2Row[] = []
+    let skipLevel = Number.POSITIVE_INFINITY
+    for (const row of rows()) {
+      if (row.level > skipLevel) continue
+      skipLevel = Number.POSITIVE_INFINITY
+      if (hidden(row.node)) {
+        skipLevel = row.level
+        continue
+      }
+      visible.push(row)
+    }
+    return visible
+  })
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const [focused, setFocused] = createSignal<string>()
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     get count() {
-      return rows().length
+      return visibleRows().length
     },
     getScrollElement: () => virtualScrollElement(root()),
     initialRect: { width: 0, height: 600 },
@@ -158,13 +217,13 @@ export default function FileTreeV2(props: {
     gap: 2,
     overscan: 10,
     get getItemKey() {
-      const current = rows()
+      const current = visibleRows()
       return (index: number) => current[index]?.node.path ?? index
     },
     rangeExtractor: (range) => {
       const indexes = defaultRangeExtractor(range)
       const path = focused()
-      const index = path ? rows().findIndex((row) => row.node.path === path) : -1
+      const index = path ? visibleRows().findIndex((row) => row.node.path === path) : -1
       if (index < 0 || indexes.includes(index)) return indexes
       return [...indexes, index].sort((a, b) => a - b)
     },
@@ -184,12 +243,12 @@ export default function FileTreeV2(props: {
       scrolledActive = undefined
       return
     }
-    const index = rows().findIndex((row) => row.node.path === path)
+    const index = visibleRows().findIndex((row) => row.node.path === path)
     if (index < 0) return
     if (scrolledActive === path) return
     scrolledActive = path
     queueMicrotask(() => {
-      const next = rows().findIndex((row) => row.node.path === path)
+      const next = visibleRows().findIndex((row) => row.node.path === path)
       if (next < 0) return
       if (virtualizer.range && next >= virtualizer.range.startIndex && next <= virtualizer.range.endIndex) return
       virtualizer.scrollToIndex(next, { align: "auto" })
@@ -224,7 +283,7 @@ export default function FileTreeV2(props: {
     props.onContextMenu(node, event)
   }
 
-  const rowByKey = createMemo(() => new Map(rows().map((row) => [row.node.path, row] as const)))
+  const rowByKey = createMemo(() => new Map(visibleRows().map((row) => [row.node.path, row] as const)))
   const virtualItemByKey = createMemo(
     () => new Map(virtualizer.getVirtualItems().map((item) => [item.key, item] as const)),
   )
@@ -234,7 +293,7 @@ export default function FileTreeV2(props: {
     <div
       ref={setRoot}
       data-component="file-tree-v2"
-      data-total-rows={live() ? rows().length : model()!.total}
+      data-total-rows={visibleRows().length}
       class="group/file-tree-v2"
       style={{ position: "relative", height: `${virtualizer.getTotalSize()}px` }}
     >
@@ -254,11 +313,43 @@ export default function FileTreeV2(props: {
                 }}
               >
                 <Show when={rowByKey().get(key as string)}>
-                  {(row) => (
-                    <>
-                      <Show
-                        when={row().node.type === "directory"}
-                        fallback={
+                  {(row) => {
+                    const content = (
+                      <>
+                        <Show
+                          when={row().node.type === "directory"}
+                          fallback={
+                            <FileTreeNodeV2
+                              node={row().node}
+                              level={row().level}
+                              active={active()}
+                              draggable={draggable()}
+                              kinds={props.kinds}
+                              as="button"
+                              type="button"
+                              class="relative"
+                              onFocus={() => setFocused(row().node.path)}
+                              onBlur={() => setFocused(undefined)}
+                              onClick={() => {
+                                if (suppressClick()) return
+                                activateRow(row())
+                                selectFile(row().node, props.onFileClick)
+                              }}
+                              onDblClick={() => selectFile(row().node, props.onFileDoubleClick)}
+                              onContextMenu={(event) => openRowMenu(row(), event)}
+                              onPointerDown={longPress}
+                            >
+                              <GuideLines level={row().level} />
+                              <Show when={row().level > 0}>
+                                <div class="w-4 shrink-0" />
+                              </Show>
+                              <span class="filetree-iconpair size-4">
+                                <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--color" />
+                                <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--mono" mono />
+                              </span>
+                            </FileTreeNodeV2>
+                          }
+                        >
                           <FileTreeNodeV2
                             node={row().node}
                             level={row().level}
@@ -270,69 +361,45 @@ export default function FileTreeV2(props: {
                             class="relative"
                             onFocus={() => setFocused(row().node.path)}
                             onBlur={() => setFocused(undefined)}
+                            aria-expanded={expanded(row().node.path)}
                             onClick={() => {
+                              if (suppressClick()) return
                               activateRow(row())
-                              selectFile(row().node, props.onFileClick)
+                              toggleDirectory(row().node.path, row().node.originalPath)
                             }}
-                            onDblClick={() => selectFile(row().node, props.onFileDoubleClick)}
                             onContextMenu={(event) => openRowMenu(row(), event)}
+                            onPointerDown={longPress}
                           >
                             <GuideLines level={row().level} />
-                            <Show when={row().level > 0}>
-                              <div class="w-4 shrink-0" />
-                            </Show>
-                            <span class="filetree-iconpair size-4">
-                              <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--color" />
-                              <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--mono" mono />
-                            </span>
+                            <div
+                              data-slot="file-tree-v2-chevron"
+                              data-expanded={expanded(row().node.path) ? "" : undefined}
+                              class="size-4 flex items-center justify-center"
+                            >
+                              <Icon name="chevron-down" />
+                            </div>
                           </FileTreeNodeV2>
-                        }
-                      >
-                        <FileTreeNodeV2
-                          node={row().node}
-                          level={row().level}
-                          active={active()}
-                          draggable={draggable()}
-                          kinds={props.kinds}
-                          as="button"
-                          type="button"
-                          class="relative"
-                          onFocus={() => setFocused(row().node.path)}
-                          onBlur={() => setFocused(undefined)}
-                          aria-expanded={expanded(row().node.path)}
-                          onClick={() => {
-                            activateRow(row())
-                            toggleDirectory(row().node.path, row().node.originalPath)
-                          }}
-                          onContextMenu={(event) => openRowMenu(row(), event)}
-                        >
-                          <GuideLines level={row().level} />
-                          <div
-                            data-slot="file-tree-v2-chevron"
-                            data-expanded={expanded(row().node.path) ? "" : undefined}
-                            class="size-4 flex items-center justify-center"
+                        </Show>
+                        <Show when={props.onContextMenu}>
+                          <button
+                            type="button"
+                            data-slot="file-tree-v2-more"
+                            class="pointer-events-none absolute end-1 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-v2-icon-icon-muted opacity-0 transition-opacity hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base focus-visible:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
+                            classList={{ "pointer-events-auto opacity-100": menuActive() === row().node.path }}
+                            aria-label={language.t("common.moreOptions")}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              activateRow(row())
+                              dispatchRowMenu(event.currentTarget, event.clientX, event.clientY)
+                            }}
                           >
-                            <Icon name="chevron-down" />
-                          </div>
-                        </FileTreeNodeV2>
-                      </Show>
-                      <Show when={props.onContextMenu}>
-                        <button
-                          type="button"
-                          data-slot="file-tree-v2-more"
-                          class="pointer-events-none absolute end-1 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-v2-icon-icon-muted opacity-0 transition-opacity hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base focus-visible:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
-                          classList={{ "pointer-events-auto opacity-100": menuActive() === row().node.path }}
-                          aria-label={language.t("common.moreOptions")}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            openRowMenu(row(), event)
-                          }}
-                        >
-                          <Icon name="outline-dots" />
-                        </button>
-                      </Show>
-                    </>
-                  )}
+                            <Icon name="outline-dots" />
+                          </button>
+                        </Show>
+                      </>
+                    )
+                    return props.contextMenu ? props.contextMenu(row().node, content) : content
+                  }}
                 </Show>
               </div>
             )}

@@ -7,11 +7,14 @@ import { SessionReviewV2Sidebar } from "@opencode-ai/session-ui/v2/session-revie
 import FileTreeV2, { type Kind } from "@/components/file-tree-v2"
 import type { FileTreeV2Node } from "@/components/file-tree-v2-model"
 import { ConfirmDialogV2 } from "@/components/dialog-confirm-v2"
-import { FileManagerMenu, FileManagerPromptV2, FileManagerToolbar } from "@/components/file-manager-v2"
+import { FileManagerContextMenu, FileManagerPromptV2 } from "@/components/file-manager-v2"
+import { FileManagerToolbarV2 } from "@/components/file-manager-toolbar-v2"
+import { breadcrumbSegments, shouldShowEntry } from "@/components/file-manager-toolbar-model"
 import {
   newTargetPath,
   parentPath,
   type FileManagerAction,
+  type FileManagerFeatures,
   type FileManagerNode,
 } from "@/components/file-manager-v2-model"
 import { FileUploadDropzone, FileUploadProgress, FileUploadV2, createFileUploader } from "@/components/file-upload-v2"
@@ -55,8 +58,9 @@ export function SessionFileBrowserTab(props: {
   const resultsID = `session-file-browser-results-${createUniqueId()}`
   const [filter, setFilter] = createSignal("")
   const [explicitHighlight, setExplicitHighlight] = createSignal<string>()
-  const [menu, setMenu] = createSignal<{ node: FileManagerNode; point: { x: number; y: number } }>()
-  const [activeNode, setActiveNode] = createSignal<FileManagerNode>()
+  const [currentDir, setCurrentDir] = createSignal("")
+  const [showHidden, setShowHidden] = createSignal(false)
+  const menuFeatures: FileManagerFeatures = { copy: false, zip: false }
   let openUpload: (() => void) | undefined
   const sidebarOpened = () => props.placeholder || props.state.sidebarOpened()
   const query = createMemo(() => filter().trim())
@@ -92,10 +96,41 @@ export function SessionFileBrowserTab(props: {
   })
   const title = createMemo(() => displayName(project() ?? { worktree: sdk().directory }))
   const optionID = (path: string) => `${resultsID}-option-${files().indexOf(path)}`
-  const activeDirectory = () => {
-    const node = activeNode()
-    if (!node) return sdk().directory
-    return node.type === "directory" ? node.path : parentPath(node.path)
+  const directoryOf = (node: { type: "file" | "directory"; path: string }) =>
+    node.type === "directory" ? node.path : node.path.includes("/") ? parentPath(node.path) : ""
+  const breadcrumb = createMemo(() => breadcrumbSegments("", currentDir()))
+  const operationDirectory = () => currentDir() || sdk().directory
+
+  const navigateTo = (path: string) => {
+    const dir = path.replace(/^\/+|\/+$/g, "")
+    setCurrentDir(dir)
+    for (const segment of breadcrumbSegments("", dir)) file.tree.expand(segment.path)
+  }
+
+  const collapseAll = () => {
+    const walk = (dir: string) => {
+      for (const node of file.tree.children(dir)) {
+        if (node.type !== "directory") continue
+        file.tree.collapse(node.path)
+        walk(node.path)
+      }
+    }
+    walk("")
+  }
+
+  const expandAll = async () => {
+    const seen = new Set<string>()
+    const walk = async (dir: string) => {
+      if (seen.has(dir)) return
+      seen.add(dir)
+      file.tree.expand(dir)
+      await file.tree.list(dir)
+      const directories = file.tree
+        .children(dir)
+        .filter((node) => node.type === "directory" && shouldShowEntry(node, showHidden()))
+      for (const node of directories) await walk(node.path)
+    }
+    await walk("")
   }
 
   const uploader = createFileUploader({
@@ -161,12 +196,11 @@ export function SessionFileBrowserTab(props: {
     if (action === "newFolder") return createFolder(node.path)
     if (action === "rename") return renameNode(node)
     if (action === "delete") return deleteNode(node)
-    downloadNode(node)
+    if (action === "download") downloadNode(node)
   }
 
-  const openNodeMenu = (node: FileTreeV2Node, event: MouseEvent) => {
-    setActiveNode({ type: node.type, path: node.path, name: node.name })
-    setMenu({ node: { type: node.type, path: node.path, name: node.name }, point: { x: event.clientX, y: event.clientY } })
+  const openNodeMenu = (node: FileTreeV2Node) => {
+    setCurrentDir(directoryOf(node))
   }
 
   const onFilterKeyDown = (event: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
@@ -187,16 +221,7 @@ export function SessionFileBrowserTab(props: {
   return (
     <>
       <SessionFilePanelV2
-        toolbar
-        toolbarStart={
-          <FileManagerToolbar
-            onNewFile={() => createFile(activeDirectory())}
-            onNewFolder={() => createFolder(activeDirectory())}
-            onUpload={() => openUpload?.()}
-            onRefresh={() => void file.tree.refresh(activeDirectory())}
-          />
-        }
-        toolbarEnd={<FileUploadProgress state={uploader.state()} />}
+        toolbar={false}
         sidebar={
           <SessionReviewV2Sidebar
             open={sidebarOpened()}
@@ -213,21 +238,46 @@ export function SessionFileBrowserTab(props: {
             width={props.state.sidebarWidth()}
             onWidthChange={props.state.resizeSidebar}
           >
+            <FileManagerToolbarV2
+              breadcrumb={breadcrumb()}
+              currentDir={currentDir()}
+              onNavigate={navigateTo}
+              onNewFile={() => createFile(operationDirectory())}
+              onNewFolder={() => createFolder(operationDirectory())}
+              onUpload={() => openUpload?.()}
+              onRefresh={() => void file.tree.refresh(currentDir())}
+              onToggleHidden={() => setShowHidden((value) => !value)}
+              showHidden={showHidden()}
+              onExpandAll={() => void expandAll()}
+              onCollapseAll={collapseAll}
+            >
+              <FileUploadProgress state={uploader.state()} />
+            </FileManagerToolbarV2>
             <Show
               when={query()}
               fallback={
-                <FileUploadDropzone
-                  onFiles={(files) => void uploader.enqueue(files, activeDirectory())}
-                >
+                <FileUploadDropzone onFiles={(files) => void uploader.enqueue(files, operationDirectory())}>
                   <FileTreeV2
                     active={props.active}
                     kinds={props.kinds}
+                    hidden={(node) => !shouldShowEntry(node, showHidden())}
                     onFileClick={(node) => props.onSelect(node.path)}
                     onFileDoubleClick={(node) => props.onSelectPermanent(node.path)}
                     onContextMenu={openNodeMenu}
-                    onActiveChange={(node) =>
-                      setActiveNode({ type: node.type, path: node.path, name: node.name })
-                    }
+                    onActiveChange={(node) => {
+                      if (node) setCurrentDir(directoryOf(node))
+                    }}
+                    contextMenu={(node, content) => (
+                      <FileManagerContextMenu
+                        node={{ type: node.type, path: node.path, name: node.name }}
+                        features={menuFeatures}
+                        onAction={(action) =>
+                          runAction(action, { type: node.type, path: node.path, name: node.name })
+                        }
+                      >
+                        {content}
+                      </FileManagerContextMenu>
+                    )}
                   />
                 </FileUploadDropzone>
               }
@@ -288,22 +338,8 @@ export function SessionFileBrowserTab(props: {
           </div>
         </Show>
       </SessionFilePanelV2>
-      <Show when={menu()}>
-        {(current) => (
-          <FileManagerMenu
-            node={current().node}
-            point={current().point}
-            onClose={() => setMenu(undefined)}
-            onAction={(action) => {
-              const node = current().node
-              setMenu(undefined)
-              runAction(action, node)
-            }}
-          />
-        )}
-      </Show>
       <FileUploadV2
-        onFiles={(files) => void uploader.enqueue(files, activeDirectory())}
+        onFiles={(files) => void uploader.enqueue(files, operationDirectory())}
         onOpenReady={(open) => {
           openUpload = open
         }}
