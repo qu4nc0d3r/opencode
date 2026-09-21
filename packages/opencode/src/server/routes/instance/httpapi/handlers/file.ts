@@ -1,4 +1,5 @@
 import * as InstanceState from "@/effect/instance-state"
+import { AuditLog } from "@/file/audit"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
@@ -7,8 +8,11 @@ import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Effect, Layer, Option } from "effect"
 import ignore from "ignore"
+import * as fsPromises from "fs/promises"
 import path from "path"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { FileOperationError } from "../groups/file"
 import { InstanceHttpApi } from "../api"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
@@ -128,6 +132,146 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return []
     })
 
+    const resolveTarget = (directory: string, input: string) => {
+      if (input.includes("\0") || input.trim() === "") return undefined
+      return path.isAbsolute(input) ? path.normalize(input) : path.resolve(directory, input)
+    }
+
+    const write = Effect.fn("FileHttpApi.write")(function* (ctx: {
+      payload: { path: string; content: string; encoding?: "utf8" | "base64" }
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.payload.path)
+      if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "write" })
+      const bytes =
+        ctx.payload.encoding === "base64" ? Buffer.from(ctx.payload.content, "base64") : ctx.payload.content
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsPromises.mkdir(path.dirname(target), { recursive: true })
+          await fsPromises.writeFile(target, bytes)
+        },
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "write", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "write", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "write", path: target, ok: true }))
+      return { path: target }
+    })
+
+    const mkdir = Effect.fn("FileHttpApi.mkdir")(function* (ctx: {
+      payload: { path: string; recursive?: boolean }
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.payload.path)
+      if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "mkdir" })
+      yield* Effect.tryPromise({
+        try: () => fsPromises.mkdir(target, { recursive: ctx.payload.recursive ?? true }).then(() => undefined),
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "mkdir", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "mkdir", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "mkdir", path: target, ok: true }))
+      return { path: target }
+    })
+
+    const rename = Effect.fn("FileHttpApi.rename")(function* (ctx: { payload: { from: string; to: string } }) {
+      const directory = (yield* InstanceState.context).directory
+      const from = resolveTarget(directory, ctx.payload.from)
+      const to = resolveTarget(directory, ctx.payload.to)
+      if (!from || !to) return yield* new FileOperationError({ message: "Invalid path", operation: "rename" })
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsPromises.mkdir(path.dirname(to), { recursive: true })
+          await fsPromises.rename(from, to)
+        },
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "rename", path: from }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "rename", from, to, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "rename", from, to, ok: true }))
+      return { path: to }
+    })
+
+    const remove = Effect.fn("FileHttpApi.remove")(function* (ctx: {
+      payload: { path: string; recursive?: boolean }
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.payload.path)
+      if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "remove" })
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsPromises.rm(target, { recursive: ctx.payload.recursive ?? false, force: false })
+        },
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "remove", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "remove", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "remove", path: target, ok: true }))
+      return { path: target }
+    })
+
+    const upload = Effect.fn("FileHttpApi.upload")(function* (ctx: {
+      query: { path: string }
+      request: HttpServerRequest.HttpServerRequest
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.query.path)
+      if (!target) return HttpServerResponse.empty({ status: 400 })
+      yield* Effect.tryPromise({
+        try: () => fsPromises.mkdir(path.dirname(target), { recursive: true }),
+        catch: () => new FileOperationError({ message: "mkdir failed", operation: "upload", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "upload", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      const bytes = new Uint8Array(
+        yield* ctx.request.arrayBuffer.pipe(
+          Effect.mapError(
+            (cause) => new FileOperationError({ message: String(cause), operation: "upload", path: target }),
+          ),
+        ),
+      )
+      yield* Effect.tryPromise({
+        try: () => fsPromises.writeFile(target, bytes),
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "upload", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "upload", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "upload", path: target, ok: true, bytes: bytes.byteLength }))
+      return HttpServerResponse.jsonUnsafe({ path: target, bytes: bytes.byteLength })
+    })
+
+    const download = Effect.fn("FileHttpApi.download")(function* (ctx: {
+      query: { path: string }
+      request: HttpServerRequest.HttpServerRequest
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.query.path)
+      if (!target) return HttpServerResponse.empty({ status: 400 })
+      const stat = yield* Effect.promise(() => fsPromises.stat(target).catch(() => undefined))
+      if (!stat || !stat.isFile()) return HttpServerResponse.empty({ status: 404 })
+      const body = yield* Effect.promise(() => fsPromises.readFile(target))
+      const name = path.basename(target).replace(/["\\\r\n]/g, "_")
+      return HttpServerResponse.uint8Array(new Uint8Array(body), {
+        contentType: FSUtil.mimeType(target),
+        headers: {
+          "content-disposition": `attachment; filename="${name}"`,
+          "content-length": String(body.byteLength),
+        },
+      })
+    })
+
     return handlers
       .handle("findText", findText)
       .handle("findFile", findFile)
@@ -135,5 +279,11 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("list", list)
       .handle("content", content)
       .handle("status", status)
+      .handle("write", write)
+      .handle("mkdir", mkdir)
+      .handle("rename", rename)
+      .handle("remove", remove)
+      .handleRaw("upload", upload)
+      .handleRaw("download", download)
   }),
 ).pipe(Layer.provide(locationServiceMapLayer))

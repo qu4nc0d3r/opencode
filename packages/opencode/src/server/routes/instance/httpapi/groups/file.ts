@@ -2,7 +2,7 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { LSP } from "@/lsp/lsp"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import {
@@ -92,6 +92,56 @@ export const LegacyStatus = Schema.Struct({
   status: Schema.Literals(["added", "deleted", "modified"]),
 }).annotate({ identifier: "File" })
 
+export const WritePayload = Schema.Struct({
+  path: Schema.String,
+  content: Schema.String,
+  encoding: Schema.optional(Schema.Literals(["utf8", "base64"])),
+})
+
+export const MkdirPayload = Schema.Struct({
+  path: Schema.String,
+  recursive: Schema.optional(Schema.Boolean),
+})
+
+export const RenamePayload = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+})
+
+export const RemovePayload = Schema.Struct({
+  path: Schema.String,
+  recursive: Schema.optional(Schema.Boolean),
+})
+
+export const UploadQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  path: Schema.String,
+})
+
+export const DownloadQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  path: Schema.String,
+})
+
+export const FileMutationResult = Schema.Struct({ path: Schema.String }).annotate({
+  identifier: "FileMutationResult",
+})
+
+export const UploadResult = Schema.Struct({
+  path: Schema.String,
+  bytes: Schema.Number,
+}).annotate({ identifier: "FileUploadResult" })
+
+export class FileOperationError extends Schema.TaggedErrorClass<FileOperationError>()(
+  "FileOperationError",
+  {
+    message: Schema.String,
+    operation: Schema.optional(Schema.String),
+    path: Schema.optional(Schema.String),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const FilePaths = {
   findText: "/find",
   findFile: "/find/file",
@@ -99,6 +149,12 @@ export const FilePaths = {
   list: "/file",
   content: "/file/content",
   status: "/file/status",
+  write: "/file/write",
+  mkdir: "/file/mkdir",
+  rename: "/file/rename",
+  remove: "/file/remove",
+  upload: "/file/upload",
+  download: "/file/download",
 } as const
 
 export const FileApi = HttpApi.make("file")
@@ -163,6 +219,76 @@ export const FileApi = HttpApi.make("file")
             identifier: "file.status",
             summary: "Get file status",
             description: "Get the git status of all files in the project.",
+          }),
+        ),
+        HttpApiEndpoint.post("write", FilePaths.write, {
+          query: WorkspaceRoutingQuery,
+          payload: WritePayload,
+          success: described(FileMutationResult, "Written file"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.write",
+            summary: "Write file",
+            description: "Create or overwrite a file, creating parent directories when missing.",
+          }),
+        ),
+        HttpApiEndpoint.post("mkdir", FilePaths.mkdir, {
+          query: WorkspaceRoutingQuery,
+          payload: MkdirPayload,
+          success: described(FileMutationResult, "Created directory"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.mkdir",
+            summary: "Create directory",
+            description: "Create a directory, including parents.",
+          }),
+        ),
+        HttpApiEndpoint.post("rename", FilePaths.rename, {
+          query: WorkspaceRoutingQuery,
+          payload: RenamePayload,
+          success: described(FileMutationResult, "Renamed path"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.rename",
+            summary: "Rename file",
+            description: "Move a file or directory, creating parent directories when missing.",
+          }),
+        ),
+        HttpApiEndpoint.post("remove", FilePaths.remove, {
+          query: WorkspaceRoutingQuery,
+          payload: RemovePayload,
+          success: described(FileMutationResult, "Removed path"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.remove",
+            summary: "Remove file",
+            description: "Delete a file or directory. Non-empty directories require recursive.",
+          }),
+        ),
+        HttpApiEndpoint.put("upload", FilePaths.upload, {
+          query: UploadQuery,
+          success: described(UploadResult, "Uploaded file"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.upload",
+            summary: "Upload file",
+            description: "Stream a raw request body to the given path.",
+          }),
+        ),
+        HttpApiEndpoint.get("download", FilePaths.download, {
+          query: DownloadQuery,
+          success: described(Schema.Uint8Array, "File bytes"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.download",
+            summary: "Download file",
+            description: "Download a file with an attachment content disposition.",
           }),
         ),
       )
