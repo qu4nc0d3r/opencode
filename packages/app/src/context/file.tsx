@@ -25,6 +25,7 @@ import { createFileViewCache } from "./file/view-cache"
 import { useServerSDK } from "./server-sdk"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
 import { createFileTreeStore } from "./file/tree-store"
+import { createFileOps } from "./file/ops"
 import { invalidateFromWatcher } from "./file/watcher"
 import {
   selectionFromLines,
@@ -90,6 +91,21 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           description: message,
         })
       },
+    })
+
+    const ops = createFileOps({
+      directory: scope,
+      api: {
+        write: (input) => serverSDK().client.file.write(input),
+        mkdir: (input) => serverSDK().client.file.mkdir(input),
+        rename: (input) => serverSDK().client.file.rename(input),
+        remove: (input) => serverSDK().client.file.remove(input),
+      },
+      refresh: (dir) => {
+        void tree.listDir(dir, { force: true })
+      },
+      onError: (message) =>
+        showToast({ variant: "error", title: language.t("file.ops.failed"), description: message }),
     })
 
     const evictContent = (keep?: Set<string>) => {
@@ -287,6 +303,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           tree.expandDir(input)
         },
       },
+      ops,
       get,
       load,
       scrollTop,
