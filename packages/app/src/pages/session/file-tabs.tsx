@@ -10,6 +10,7 @@ import { createLineCommentControllerV2 } from "@opencode-ai/session-ui/v2/line-c
 import { sampledChecksum } from "@opencode-ai/core/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { LineCommentV2OverflowIcon } from "@opencode-ai/ui/v2/line-comment-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { Tabs } from "@opencode-ai/ui/tabs"
@@ -23,6 +24,8 @@ import { useSettings } from "@/context/settings"
 import { getSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { FileEditorV2 } from "@/pages/session/v2/file-editor-v2"
+import { createDirtyState, EDIT_MAX_BYTES } from "@/pages/session/v2/file-editor-model"
 
 type SessionFileViewProps = {
   tab: string
@@ -628,6 +631,69 @@ function SessionFileViewV2(props: { tab: string }) {
 
   const activeSelection = () => note.selected ?? selectedLines()
 
+  const [editing, setEditing] = createSignal(false)
+  const [saving, setSaving] = createSignal(false)
+  const dirty = createDirtyState()
+
+  const textContent = createMemo(() => {
+    const value = state()?.content
+    if (!value || value.type !== "text") return
+    return value
+  })
+
+  const editable = createMemo(() => {
+    const value = textContent()
+    return !!value && value.content.length <= EDIT_MAX_BYTES
+  })
+
+  const draft = createMemo(() => {
+    const p = path()
+    return p ? dirty.draft(p) : undefined
+  })
+
+  const hasUnsaved = createMemo(() => {
+    const value = textContent()
+    const pending = draft()
+    if (!value || pending === undefined) return false
+    return pending !== value.content
+  })
+
+  const startEdit = () => {
+    const p = path()
+    const value = textContent()
+    if (!p || !value) return
+    if (!dirty.isDirty(p)) dirty.markDirty(p, value.content)
+    setEditing(true)
+  }
+
+  const toggleEdit = () => {
+    if (editing()) {
+      setEditing(false)
+      return
+    }
+    startEdit()
+  }
+
+  const revertEdit = () => {
+    const p = path()
+    if (!p) return
+    dirty.clear(p)
+  }
+
+  const saveEdit = async (value: string) => {
+    const p = path()
+    if (!p) return
+    setSaving(true)
+    try {
+      const ok = await file.ops.write(p, value)
+      if (!ok) return
+      await file.load(p, { force: true })
+      dirty.clear(p)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const commentsUi = createLineCommentControllerV2({
     comments: fileComments,
     label: language.t("ui.lineComment.submit"),
@@ -783,16 +849,54 @@ function SessionFileViewV2(props: { tab: string }) {
   )
 
   const content = () => (
-    <div class="mt-3 relative h-full min-h-0">
-      <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+    <div class="mt-3 relative flex h-full min-h-0 flex-col">
+      <Show when={editable()}>
+        <div class="flex shrink-0 items-center justify-end gap-2 px-6 pb-2">
+          <Show when={!editing() && hasUnsaved()}>
+            <span class="text-12-regular text-text-weak">Unsaved changes</span>
+          </Show>
+          <ButtonV2
+            size="small"
+            variant={editing() ? "neutral" : "ghost"}
+            aria-pressed={editing()}
+            data-action="file-edit-toggle"
+            onClick={toggleEdit}
+          >
+            {editing() ? "Done" : "Edit"}
+          </ButtonV2>
+        </div>
+      </Show>
+      <Show
+        when={editing() && textContent()}
+        fallback={
+          <div class="min-h-0 flex-1">
+            <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
+              <Switch>
+                <Match when={state()?.loaded}>{renderFile(contents())}</Match>
+                <Match when={state()?.loading}>
+                  <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+                </Match>
+                <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+              </Switch>
+            </ScrollView>
+          </div>
+        }
+      >
+        {(value) => (
+          <FileEditorV2
+            path={path() ?? ""}
+            content={value().content}
+            value={draft() ?? value().content}
+            saving={saving()}
+            onInput={(next) => {
+              const p = path()
+              if (p) dirty.markDirty(p, next)
+            }}
+            onSave={saveEdit}
+            onRevert={revertEdit}
+          />
+        )}
+      </Show>
     </div>
   )
 
