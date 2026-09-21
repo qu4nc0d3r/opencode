@@ -1,5 +1,6 @@
 import * as InstanceState from "@/effect/instance-state"
 import { AuditLog } from "@/file/audit"
+import { createZip, extractZip } from "@/file/zip"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
@@ -143,8 +144,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       const directory = (yield* InstanceState.context).directory
       const target = resolveTarget(directory, ctx.payload.path)
       if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "write" })
-      const bytes =
-        ctx.payload.encoding === "base64" ? Buffer.from(ctx.payload.content, "base64") : ctx.payload.content
+      const bytes = ctx.payload.encoding === "base64" ? Buffer.from(ctx.payload.content, "base64") : ctx.payload.content
       yield* Effect.tryPromise({
         try: async () => {
           await fsPromises.mkdir(path.dirname(target), { recursive: true })
@@ -160,9 +160,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return { path: target }
     })
 
-    const mkdir = Effect.fn("FileHttpApi.mkdir")(function* (ctx: {
-      payload: { path: string; recursive?: boolean }
-    }) {
+    const mkdir = Effect.fn("FileHttpApi.mkdir")(function* (ctx: { payload: { path: string; recursive?: boolean } }) {
       const directory = (yield* InstanceState.context).directory
       const target = resolveTarget(directory, ctx.payload.path)
       if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "mkdir" })
@@ -198,9 +196,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return { path: to }
     })
 
-    const remove = Effect.fn("FileHttpApi.remove")(function* (ctx: {
-      payload: { path: string; recursive?: boolean }
-    }) {
+    const remove = Effect.fn("FileHttpApi.remove")(function* (ctx: { payload: { path: string; recursive?: boolean } }) {
       const directory = (yield* InstanceState.context).directory
       const target = resolveTarget(directory, ctx.payload.path)
       if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "remove" })
@@ -216,6 +212,82 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       )
       yield* Effect.promise(() => AuditLog.record({ op: "remove", path: target, ok: true }))
       return { path: target }
+    })
+
+    const copy = Effect.fn("FileHttpApi.copy")(function* (ctx: {
+      payload: { from: string; to: string; overwrite?: boolean }
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const from = resolveTarget(directory, ctx.payload.from)
+      const to = resolveTarget(directory, ctx.payload.to)
+      if (!from || !to) return yield* new FileOperationError({ message: "Invalid path", operation: "copy" })
+      const exists = yield* Effect.promise(() =>
+        fsPromises.stat(to).then(
+          () => true,
+          () => false,
+        ),
+      )
+      if (exists && !ctx.payload.overwrite) {
+        yield* Effect.promise(() => AuditLog.record({ op: "copy", from, to, ok: false, error: "Destination exists" }))
+        return yield* new FileOperationError({ message: "Destination exists", operation: "copy", path: to })
+      }
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fsPromises.rm(to, { recursive: true, force: true })
+          await fsPromises.mkdir(path.dirname(to), { recursive: true })
+          await fsPromises.cp(from, to, { recursive: true, force: true })
+        },
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "copy", path: to }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "copy", from, to, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "copy", from, to, ok: true }))
+      return { path: to }
+    })
+
+    const archive = Effect.fn("FileHttpApi.archive")(function* (ctx: {
+      payload: { paths: readonly string[]; dest: string }
+    }) {
+      const directory = (yield* InstanceState.context).directory
+      const dest = resolveTarget(directory, ctx.payload.dest)
+      if (!dest || ctx.payload.paths.length === 0)
+        return yield* new FileOperationError({ message: "Invalid path", operation: "archive" })
+      const targets: string[] = []
+      for (const item of ctx.payload.paths) {
+        const target = resolveTarget(directory, item)
+        if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "archive" })
+        targets.push(target)
+      }
+      const result = yield* Effect.tryPromise({
+        try: () => createZip({ paths: targets, dest }),
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "archive", path: dest }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "archive", path: dest, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "archive", path: dest, ok: true, bytes: result.bytes }))
+      return { path: dest, bytes: result.bytes }
+    })
+
+    const extract = Effect.fn("FileHttpApi.extract")(function* (ctx: { payload: { path: string; dest?: string } }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = resolveTarget(directory, ctx.payload.path)
+      if (!target) return yield* new FileOperationError({ message: "Invalid path", operation: "extract" })
+      const dest = ctx.payload.dest ? resolveTarget(directory, ctx.payload.dest) : path.dirname(target)
+      if (!dest) return yield* new FileOperationError({ message: "Invalid path", operation: "extract" })
+      yield* Effect.tryPromise({
+        try: () => extractZip({ path: target, dest }),
+        catch: (cause) => new FileOperationError({ message: String(cause), operation: "extract", path: target }),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.promise(() => AuditLog.record({ op: "extract", path: target, ok: false, error: String(error) })),
+        ),
+      )
+      yield* Effect.promise(() => AuditLog.record({ op: "extract", path: target, ok: true }))
+      return { path: dest }
     })
 
     const upload = Effect.fn("FileHttpApi.upload")(function* (ctx: {
@@ -283,6 +355,9 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("mkdir", mkdir)
       .handle("rename", rename)
       .handle("remove", remove)
+      .handle("copy", copy)
+      .handle("archive", archive)
+      .handle("extract", extract)
       .handleRaw("upload", upload)
       .handleRaw("download", download)
   }),

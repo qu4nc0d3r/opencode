@@ -139,4 +139,59 @@ describe("file HttpApi mutations", () => {
     expect(download.headers.get("content-disposition")).toContain("blob.bin")
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(body)
   })
+
+  test("copy duplicates a directory", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const from = path.join(tmp.path, "src")
+    await fs.mkdir(from)
+    await Bun.write(path.join(from, "a.txt"), "x")
+    const to = path.join(tmp.path, "dst")
+
+    const response = await post(FilePaths.copy, tmp.path, { from, to })
+
+    expect(response.status).toBe(200)
+    expect(await fs.readFile(path.join(to, "a.txt"), "utf8")).toBe("x")
+  })
+
+  test("copy refuses to overwrite without the flag", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const from = path.join(tmp.path, "a.txt")
+    const to = path.join(tmp.path, "b.txt")
+    await Bun.write(from, "x")
+    await Bun.write(to, "y")
+
+    const response = await post(FilePaths.copy, tmp.path, { from, to })
+
+    expect(response.status).toBe(400)
+    expect(await fs.readFile(to, "utf8")).toBe("y")
+  })
+
+  test("archive and extract round-trip", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const folder = path.join(tmp.path, "pack")
+    await fs.mkdir(folder)
+    await Bun.write(path.join(folder, "one.txt"), "1")
+    await Bun.write(path.join(folder, "two.txt"), "2")
+    const zip = path.join(tmp.path, "pack.zip")
+
+    const archived = await post(FilePaths.archive, tmp.path, { paths: [folder], dest: zip })
+    expect(archived.status).toBe(200)
+
+    const out = path.join(tmp.path, "out")
+    const extracted = await post(FilePaths.extract, tmp.path, { path: zip, dest: out })
+    expect(extracted.status).toBe(200)
+    expect(await fs.readFile(path.join(out, "pack", "one.txt"), "utf8")).toBe("1")
+  })
+
+  test("extract rejects zip-slip entries", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const zip = path.join(tmp.path, "evil.zip")
+    const { zipSync } = await import("fflate")
+    await fs.writeFile(zip, Buffer.from(zipSync({ "../escape.txt": new TextEncoder().encode("x") })))
+
+    const response = await post(FilePaths.extract, tmp.path, { path: zip })
+
+    expect(response.status).toBe(400)
+    await expect(fs.stat(path.join(tmp.path, "..", "escape.txt"))).rejects.toThrow()
+  })
 })

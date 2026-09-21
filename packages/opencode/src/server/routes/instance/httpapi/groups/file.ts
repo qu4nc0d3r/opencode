@@ -113,6 +113,22 @@ export const RemovePayload = Schema.Struct({
   recursive: Schema.optional(Schema.Boolean),
 })
 
+export const CopyPayload = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+  overwrite: Schema.optional(Schema.Boolean),
+})
+
+export const ArchivePayload = Schema.Struct({
+  paths: Schema.Array(Schema.String),
+  dest: Schema.String,
+})
+
+export const ExtractPayload = Schema.Struct({
+  path: Schema.String,
+  dest: Schema.optional(Schema.String),
+})
+
 export const UploadQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   path: Schema.String,
@@ -131,6 +147,11 @@ export const UploadResult = Schema.Struct({
   path: Schema.String,
   bytes: Schema.Number,
 }).annotate({ identifier: "FileUploadResult" })
+
+export const ArchiveResult = Schema.Struct({
+  path: Schema.String,
+  bytes: Schema.Number,
+}).annotate({ identifier: "FileArchiveResult" })
 
 export class FileOperationError extends Schema.TaggedErrorClass<FileOperationError>()(
   "FileOperationError",
@@ -153,6 +174,9 @@ export const FilePaths = {
   mkdir: "/file/mkdir",
   rename: "/file/rename",
   remove: "/file/remove",
+  copy: "/file/copy",
+  archive: "/file/archive",
+  extract: "/file/extract",
   upload: "/file/upload",
   download: "/file/download",
 } as const
@@ -267,6 +291,42 @@ export const FileApi = HttpApi.make("file")
             identifier: "file.remove",
             summary: "Remove file",
             description: "Delete a file or directory. Non-empty directories require recursive.",
+          }),
+        ),
+        HttpApiEndpoint.post("copy", FilePaths.copy, {
+          query: WorkspaceRoutingQuery,
+          payload: CopyPayload,
+          success: described(FileMutationResult, "Copied path"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.copy",
+            summary: "Copy file",
+            description: "Copy a file or directory, refusing to overwrite the destination unless requested.",
+          }),
+        ),
+        HttpApiEndpoint.post("archive", FilePaths.archive, {
+          query: WorkspaceRoutingQuery,
+          payload: ArchivePayload,
+          success: described(ArchiveResult, "Created archive"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.archive",
+            summary: "Archive files",
+            description: "Compress one or more files or directories into a zip archive.",
+          }),
+        ),
+        HttpApiEndpoint.post("extract", FilePaths.extract, {
+          query: WorkspaceRoutingQuery,
+          payload: ExtractPayload,
+          success: described(FileMutationResult, "Extracted archive"),
+          error: [HttpApiError.BadRequest, FileOperationError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.extract",
+            summary: "Extract archive",
+            description: "Extract a zip archive, rejecting entries that escape the destination.",
           }),
         ),
         HttpApiEndpoint.put("upload", FilePaths.upload, {
