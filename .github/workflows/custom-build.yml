@@ -1,0 +1,28 @@
+name: custom-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - custom-fs
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Build
+        run: ./packages/opencode/script/build.ts --single
+        env:
+          OPENCODE_VERSION: 0.1.0-custom
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencode-linux-x64
+          path: packages/opencode/dist/opencode-linux-x64/bin/opencode
+          if-no-files-found: error
