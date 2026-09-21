@@ -31,6 +31,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import FileTree from "@/components/file-tree"
 import { normalizeFileTreeV2Path } from "@/components/file-tree-v2-model"
 import { SessionContextUsage } from "@/components/session-context-usage"
+import { useUnsavedChangesGuard } from "@/components/dialog-unsaved-v2"
 
 const reviewTabID = "session-side-panel-review-tab"
 const reviewTabPanelID = "session-side-panel-review-tabpanel"
@@ -55,6 +56,7 @@ import {
 } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { unsavedEditorGuards } from "@/pages/session/v2/file-editor-guard"
 import { SessionFileBrowserTab, type SessionFileBrowserState } from "@/pages/session/v2/session-file-browser-tab"
 
 type ReviewDiff = FileDiffInfo | SnapshotFileDiff | VcsFileDiff
@@ -164,7 +166,7 @@ export function SessionSidePanel(props: {
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
   }
 
-  const openTab = createOpenSessionFileTab({
+  const openTabDirect = createOpenSessionFileTab({
     normalizeTab,
     openTab: tabs().open,
     pathFromTab: file.pathFromTab,
@@ -188,6 +190,25 @@ export function SessionSidePanel(props: {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
 
+  const confirmUnsaved = useUnsavedChangesGuard()
+
+  const runWithUnsavedGuard = (next: string, run: () => void) => {
+    if (next === activeTab() || next === "review" || next === "context") {
+      run()
+      return
+    }
+    confirmUnsaved(unsavedEditorGuards(activeFileTab()), run)
+  }
+
+  const closeTabWithGuard = (tab: string) => {
+    confirmUnsaved(unsavedEditorGuards(tab), () => tabs().close(tab))
+  }
+
+  const openTab = (value: string) => {
+    const next = normalizeTab(value)
+    runWithUnsavedGuard(next, () => openTabDirect(value))
+  }
+
   const fileTreeTab = () => layout.fileTree.tab()
 
   const setFileTreeTabValue = (value: string) => {
@@ -205,11 +226,13 @@ export function SessionSidePanel(props: {
   const temporaryTab = tabs().preview
   const previewTab = (value: string) => {
     const next = normalizeTab(value)
-    tabs().previewTab(next)
-    const path = file.pathFromTab(next)
-    if (path) void file.load(path)
-    openReviewPanel()
-    queueMicrotask(() => tabs().setActive(next))
+    runWithUnsavedGuard(next, () => {
+      tabs().previewTab(next)
+      const path = file.pathFromTab(next)
+      if (path) void file.load(path)
+      openReviewPanel()
+      queueMicrotask(() => tabs().setActive(next))
+    })
   }
   const openFileBrowser = () => {
     previewTab(SESSION_OPEN_FILE_TAB)
@@ -217,10 +240,12 @@ export function SessionSidePanel(props: {
   }
   const activateTab = (value: string) => {
     const next = normalizeTab(value)
-    const path = file.pathFromTab(next)
-    if (path) void file.load(path)
-    openReviewPanel()
-    tabs().setActive(next)
+    runWithUnsavedGuard(next, () => {
+      const path = file.pathFromTab(next)
+      if (path) void file.load(path)
+      openReviewPanel()
+      tabs().setActive(next)
+    })
   }
   const browserTab = createMemo(() => {
     if (!props.fileBrowserState) return undefined
@@ -400,7 +425,7 @@ export function SessionSidePanel(props: {
                                         <SortableTab
                                           tab={tab}
                                           temporary={temporaryTab() === tab}
-                                          onTabClose={tabs().close}
+                                          onTabClose={closeTabWithGuard}
                                           onTabDoubleClick={temporaryTab() === tab ? openTab : undefined}
                                         />
                                       }
@@ -614,7 +639,7 @@ export function SessionSidePanel(props: {
                                       tab={tab}
                                       index={() => tabs().all().indexOf(tab)}
                                       temporary={temporaryTab() === tab}
-                                      onTabClose={tabs().close}
+                                      onTabClose={closeTabWithGuard}
                                       onTabDoubleClick={temporaryTab() === tab ? openTab : undefined}
                                     />
                                   }

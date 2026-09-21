@@ -15,6 +15,8 @@ import { showToast } from "@/utils/toast"
 import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from "@/utils/session-export"
 import { findLast } from "@opencode-ai/core/util/array"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { useUnsavedChangesGuard } from "@/components/dialog-unsaved-v2"
+import { unsavedEditorGuards } from "@/pages/session/v2/file-editor-guard"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { Message, Part, UserMessage } from "@opencode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
@@ -91,6 +93,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   })
   const activeFileTab = tabState.activeFileTab
   const closableTab = tabState.closableTab
+  const confirmUnsaved = useUnsavedChangesGuard()
   const shown = settings.visibility.fileTree
 
   const messages = () => {
@@ -270,7 +273,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const closeTab = () => {
     const tab = closableTab()
     if (!tab) return
-    tabs().close(tab)
+    confirmUnsaved(unsavedEditorGuards(tab), () => tabs().close(tab))
   }
 
   const addSelection = () => {

@@ -26,6 +26,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { FileEditorV2 } from "@/pages/session/v2/file-editor-v2"
 import { createDirtyState, EDIT_MAX_BYTES } from "@/pages/session/v2/file-editor-model"
+import { registerEditorGuard } from "@/pages/session/v2/file-editor-guard"
 
 type SessionFileViewProps = {
   tab: string
@@ -682,17 +683,40 @@ function SessionFileViewV2(props: { tab: string }) {
 
   const saveEdit = async (value: string) => {
     const p = path()
-    if (!p) return
+    if (!p) return false
     setSaving(true)
     try {
       const ok = await file.ops.write(p, value)
-      if (!ok) return
+      if (!ok) return false
       await file.load(p, { force: true })
       dirty.clear(p)
+      return true
     } finally {
       setSaving(false)
     }
   }
+
+  onCleanup(
+    registerEditorGuard({
+      tab: props.tab,
+      path: path() ?? "",
+      hasUnsaved: () => hasUnsaved(),
+      save: () => saveEdit(draft() ?? contents()),
+      discard: () => revertEdit(),
+    }),
+  )
+
+  createEffect(() => {
+    if (typeof window === "undefined") return
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsaved()) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    makeEventListener(window, "beforeunload", onBeforeUnload)
+  })
 
   const commentsUi = createLineCommentControllerV2({
     comments: fileComments,
