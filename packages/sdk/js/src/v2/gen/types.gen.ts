@@ -2303,6 +2303,22 @@ export type File = {
   status: "added" | "deleted" | "modified"
 }
 
+export type FileMutationResult = {
+  path: string
+}
+
+export type FileOperationError = {
+  _tag: "FileOperationError"
+  message: string
+  operation?: string
+  path?: string
+}
+
+export type FileUploadResult = {
+  path: string
+  bytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
 export type Path = {
   home: string
   state: string
@@ -8083,6 +8099,189 @@ export type FileStatusResponses = {
 }
 
 export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
+
+export type FileWriteData = {
+  body?: {
+    path: string
+    content: string
+    encoding?: "utf8" | "base64"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/write"
+}
+
+export type FileWriteErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
+
+export type FileWriteResponses = {
+  /**
+   * Written file
+   */
+  200: FileMutationResult
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
+
+export type FileMkdirData = {
+  body?: {
+    path: string
+    recursive?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/mkdir"
+}
+
+export type FileMkdirErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileMkdirError = FileMkdirErrors[keyof FileMkdirErrors]
+
+export type FileMkdirResponses = {
+  /**
+   * Created directory
+   */
+  200: FileMutationResult
+}
+
+export type FileMkdirResponse = FileMkdirResponses[keyof FileMkdirResponses]
+
+export type FileRenameData = {
+  body?: {
+    from: string
+    to: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/rename"
+}
+
+export type FileRenameErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileRenameError = FileRenameErrors[keyof FileRenameErrors]
+
+export type FileRenameResponses = {
+  /**
+   * Renamed path
+   */
+  200: FileMutationResult
+}
+
+export type FileRenameResponse = FileRenameResponses[keyof FileRenameResponses]
+
+export type FileRemoveData = {
+  body?: {
+    path: string
+    recursive?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/remove"
+}
+
+export type FileRemoveErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileRemoveError = FileRemoveErrors[keyof FileRemoveErrors]
+
+export type FileRemoveResponses = {
+  /**
+   * Removed path
+   */
+  200: FileMutationResult
+}
+
+export type FileRemoveResponse = FileRemoveResponses[keyof FileRemoveResponses]
+
+export type FileUploadData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    path: string
+  }
+  url: "/file/upload"
+}
+
+export type FileUploadErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileUploadError = FileUploadErrors[keyof FileUploadErrors]
+
+export type FileUploadResponses = {
+  /**
+   * Uploaded file
+   */
+  200: FileUploadResult
+}
+
+export type FileUploadResponse = FileUploadResponses[keyof FileUploadResponses]
+
+export type FileDownloadData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    path: string
+  }
+  url: "/file/download"
+}
+
+export type FileDownloadErrors = {
+  /**
+   * BadRequest | FileOperationError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | FileOperationError | InvalidRequestError
+}
+
+export type FileDownloadError = FileDownloadErrors[keyof FileDownloadErrors]
+
+export type FileDownloadResponses = {
+  /**
+   * File bytes
+   */
+  200: string
+}
+
+export type FileDownloadResponse = FileDownloadResponses[keyof FileDownloadResponses]
 
 export type InstanceDisposeData = {
   body?: never
