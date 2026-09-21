@@ -1,4 +1,5 @@
 import { useFile } from "@/context/file"
+import { useLanguage } from "@/context/language"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import "@opencode-ai/ui/v2/file-tree-v2.css"
 import {
@@ -130,8 +131,12 @@ export default function FileTreeV2(props: {
   draggable?: boolean
   onFileClick?: (file: FileNode) => void
   onFileDoubleClick?: (file: FileNode) => void
+  onContextMenu?: (node: FileTreeV2Node, event: MouseEvent) => void
+  onActiveChange?: (node: FileTreeV2Node | undefined) => void
 }) {
   const file = useFile()
+  const language = useLanguage()
+  const [menuActive, setMenuActive] = createSignal<string>()
   const live = () => props.allowed === undefined
   const draggable = () => props.draggable ?? true
   const active = () => normalizeFileTreeV2Path(props.active ?? "")
@@ -207,6 +212,18 @@ export default function FileTreeV2(props: {
     file.tree.expand(originalPath, live() ? undefined : { list: false })
   }
 
+  const activateRow = (node: FileTreeV2Node) => {
+    setMenuActive(node.path)
+    props.onActiveChange?.(node)
+  }
+
+  const openRowMenu = (node: FileTreeV2Node, event: MouseEvent) => {
+    if (!props.onContextMenu) return
+    event.preventDefault()
+    setMenuActive(node.path)
+    props.onContextMenu(node, event)
+  }
+
   const rowByKey = createMemo(() => new Map(rows().map((row) => [row.node.path, row] as const)))
   const virtualItemByKey = createMemo(
     () => new Map(virtualizer.getVirtualItems().map((item) => [item.key, item] as const)),
@@ -226,6 +243,7 @@ export default function FileTreeV2(props: {
           <Show when={virtualItemByKey().get(key)}>
             {(item) => (
               <div
+                class="group/row"
                 style={{
                   position: "absolute",
                   top: "0",
@@ -237,9 +255,39 @@ export default function FileTreeV2(props: {
               >
                 <Show when={rowByKey().get(key as string)}>
                   {(row) => (
-                    <Show
-                      when={row().node.type === "directory"}
-                      fallback={
+                    <>
+                      <Show
+                        when={row().node.type === "directory"}
+                        fallback={
+                          <FileTreeNodeV2
+                            node={row().node}
+                            level={row().level}
+                            active={active()}
+                            draggable={draggable()}
+                            kinds={props.kinds}
+                            as="button"
+                            type="button"
+                            class="relative"
+                            onFocus={() => setFocused(row().node.path)}
+                            onBlur={() => setFocused(undefined)}
+                            onClick={() => {
+                              activateRow(row())
+                              selectFile(row().node, props.onFileClick)
+                            }}
+                            onDblClick={() => selectFile(row().node, props.onFileDoubleClick)}
+                            onContextMenu={(event) => openRowMenu(row(), event)}
+                          >
+                            <GuideLines level={row().level} />
+                            <Show when={row().level > 0}>
+                              <div class="w-4 shrink-0" />
+                            </Show>
+                            <span class="filetree-iconpair size-4">
+                              <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--color" />
+                              <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--mono" mono />
+                            </span>
+                          </FileTreeNodeV2>
+                        }
+                      >
                         <FileTreeNodeV2
                           node={row().node}
                           level={row().level}
@@ -251,44 +299,39 @@ export default function FileTreeV2(props: {
                           class="relative"
                           onFocus={() => setFocused(row().node.path)}
                           onBlur={() => setFocused(undefined)}
-                          onClick={() => selectFile(row().node, props.onFileClick)}
-                          onDblClick={() => selectFile(row().node, props.onFileDoubleClick)}
+                          aria-expanded={expanded(row().node.path)}
+                          onClick={() => {
+                            activateRow(row())
+                            toggleDirectory(row().node.path, row().node.originalPath)
+                          }}
+                          onContextMenu={(event) => openRowMenu(row(), event)}
                         >
                           <GuideLines level={row().level} />
-                          <Show when={row().level > 0}>
-                            <div class="w-4 shrink-0" />
-                          </Show>
-                          <span class="filetree-iconpair size-4">
-                            <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--color" />
-                            <FileIcon node={row().node} class="size-4 filetree-icon filetree-icon--mono" mono />
-                          </span>
+                          <div
+                            data-slot="file-tree-v2-chevron"
+                            data-expanded={expanded(row().node.path) ? "" : undefined}
+                            class="size-4 flex items-center justify-center"
+                          >
+                            <Icon name="chevron-down" />
+                          </div>
                         </FileTreeNodeV2>
-                      }
-                    >
-                      <FileTreeNodeV2
-                        node={row().node}
-                        level={row().level}
-                        active={active()}
-                        draggable={draggable()}
-                        kinds={props.kinds}
-                        as="button"
-                        type="button"
-                        class="relative"
-                        onFocus={() => setFocused(row().node.path)}
-                        onBlur={() => setFocused(undefined)}
-                        aria-expanded={expanded(row().node.path)}
-                        onClick={() => toggleDirectory(row().node.path, row().node.originalPath)}
-                      >
-                        <GuideLines level={row().level} />
-                        <div
-                          data-slot="file-tree-v2-chevron"
-                          data-expanded={expanded(row().node.path) ? "" : undefined}
-                          class="size-4 flex items-center justify-center"
+                      </Show>
+                      <Show when={props.onContextMenu}>
+                        <button
+                          type="button"
+                          data-slot="file-tree-v2-more"
+                          class="pointer-events-none absolute end-1 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-v2-icon-icon-muted opacity-0 transition-opacity hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base focus-visible:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
+                          classList={{ "pointer-events-auto opacity-100": menuActive() === row().node.path }}
+                          aria-label={language.t("common.moreOptions")}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openRowMenu(row(), event)
+                          }}
                         >
-                          <Icon name="chevron-down" />
-                        </div>
-                      </FileTreeNodeV2>
-                    </Show>
+                          <Icon name="outline-dots" />
+                        </button>
+                      </Show>
+                    </>
                   )}
                 </Show>
               </div>
